@@ -1,0 +1,22 @@
+# Configuration
+HIKVISION_DEVICE_CONFIG = {
+    "device_ip": "your device ip",
+    "username": "username",
+    "password": "password",
+    "attendance_endpoint": "/ISAPI/AccessControl/LocalAttendance/SearchRecordSheet",
+}
+
+ERPNEXT_CONFIG = {
+    "base_url": "your erpnext site url",
+    "api_key": "api_key",
+    "api_secret": "api_secret",
+}
+
+LOG_CONFIG = {
+    "success_log": "attendance_success.log",
+    "failure_log": "attendance_failure.log",
+    "sent_timestamps_log": "sent_timestamps.log",
+}
+
+FETCH_INTERVAL = 300 # seconds
+DATE_FORMAT = "%Y-%m-%dT%H:%M:%S"
