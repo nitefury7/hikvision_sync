@@ -104,6 +104,38 @@ def send_to_erpnext(employee_field_value, timestamp, device_id, log_type):
         return False
 
 
+def fetch_all_shift_types():
+    url = f"{config.ERPNEXT_CONFIG['base_url']}/api/resource/Shift Type"
+    headers = {
+        "Authorization": f"token {config.ERPNEXT_CONFIG['api_key']}:{config.ERPNEXT_CONFIG['api_secret']}",
+        "Content-Type": "application/json",
+    }
+    try:
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        shift_types = response.json().get("data", [])
+        return [shift_type["name"] for shift_type in shift_types]
+    except Exception as e:
+        failure_logger.error(f"Failed to fetch shift types: {e}")
+        return []
+
+
+def update_last_sync_time(shift_type_name, sync_timestamp):
+    url = f"{config.ERPNEXT_CONFIG['base_url']}/api/resource/Shift Type/{shift_type_name}"
+    headers = {
+        "Authorization": f"token {config.ERPNEXT_CONFIG['api_key']}:{config.ERPNEXT_CONFIG['api_secret']}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "last_sync_of_checkin": sync_timestamp
+    }
+    try:
+        response = requests.put(url, headers=headers, json=payload)
+        response.raise_for_status()
+        success_logger.info(f"Updated shift type sync: {shift_type_name} to {sync_timestamp}")
+    except Exception as e:
+        failure_logger.error(f"Failed to update shift type sync for {shift_type_name}: {e}")
+
 def process_logs(logs, device_id, sent_timestamps):
     for employee in logs:
         employee_no = employee.get("employeeNo")
@@ -123,16 +155,21 @@ def process_logs(logs, device_id, sent_timestamps):
                         sent_timestamps[employee_no].add(timestamp)
                         save_sent_timestamp(employee_no, timestamp)
 
+    sync_timestamp = datetime.now().strftime(config.DATE_FORMAT)
+    shift_types = fetch_all_shift_types()
+    for shift_type in shift_types:
+        update_last_sync_time(shift_type, sync_timestamp)
+
 
 def convert_minutes_to_time(minutes):
     hours = minutes // 60
     minutes = minutes % 60
     return f"{hours:02}:{minutes:02}:00"
 
-def fetch_logs_from_file(file_path):
+def fetch_logs_from_json(file_path):
     try:
         with open(file_path, "r") as file:
-            data = json.load(file)  # Load JSON data into a Python dictionary
+            data = json.load(file)
             return data
     except FileNotFoundError:
         print(f"Error: The file {file_path} does not exist.")
