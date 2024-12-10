@@ -5,7 +5,7 @@ from logging.handlers import RotatingFileHandler
 from datetime import datetime, timedelta
 import os
 import config
-
+from time import sleep
 
 def setup_logging():
     logging.basicConfig(level=logging.INFO)
@@ -51,41 +51,51 @@ def save_sent_timestamp(employee_no, timestamp):
 
 
 def fetch_attendance_logs(start_time, end_time):
-    url = f"http://{config.HIKVISION_DEVICE_CONFIG['device_ip']}{config.HIKVISION_DEVICE_CONFIG['attendance_endpoint']}"
-    params = {
-        "format": "json",
-        "security": "1",
-    }
-    payload = {
-        "SearchRecord": {
-            "searchID": "AttendanceFetch",
-            "searchResultPosition": 0,
-            "maxResults": 100,
-            "timeRange": {"startTime": start_time, "endTime": end_time},
+    i = 1
+    matchResults = []
+    offset_value = 10
+    no_of_employees = offset_value
+    while True:
+        url = f"http://{config.HIKVISION_DEVICE_CONFIG['device_ip']}{config.HIKVISION_DEVICE_CONFIG['attendance_endpoint']}"
+        params = {
+            "format": "json",
+            "security": "1",
         }
-    }
-    try:
-        response = requests.post(
-            url,
-            params=params,
-            auth=(
-                config.HIKVISION_DEVICE_CONFIG["username"],
-                config.HIKVISION_DEVICE_CONFIG["password"],
-            ),
-            json=payload,
-            timeout=10,
-        )
-        response.raise_for_status()
-        return response.json()
-    except Exception as e:
-        failure_logger.error(f"Failed to fetch logs: {e}")
-        return None
+        payload = {
+            "searchID": "7215c76ab5d843179d31d3ee4b1d7aef",
+            "searchResultPosition": i,
+            "maxResults": offset_value,
+            "statisticalTime": "month",
+            "month": datetime.now().strftime("%Y-%m"),
+        }
+        try:
+            if i > no_of_employees:
+                return matchResults
+            response = requests.post(
+                url,
+                params=params,
+                auth= requests.auth.HTTPDigestAuth(
+                    config.HIKVISION_DEVICE_CONFIG["username"],
+                    config.HIKVISION_DEVICE_CONFIG["password"],
+                ),
+                json=payload,
+                timeout=10,
+            )
+            response.raise_for_status()
+            no_of_employees = int(response.json().get("totalMatches"))
+            matchResults.extend(response.json().get("matchResults"))
 
+        except Exception as e:
+            failure_logger.error(f"Failed to fetch logs: {e}")
+            return None
+
+        i += 10
 
 def send_to_erpnext(employee_field_value, timestamp, device_id, log_type):
     url = f"{config.ERPNEXT_CONFIG['base_url']}/api/method/hrms.hr.doctype.employee_checkin.employee_checkin.add_log_based_on_employee_field"
     headers = {
         "Authorization": f"token {config.ERPNEXT_CONFIG['api_key']}:{config.ERPNEXT_CONFIG['api_secret']}",
+        "Accept": "application/json",
         "Content-Type": "application/json",
     }
     payload = {
@@ -130,7 +140,7 @@ def update_last_sync_time(shift_type_name, sync_timestamp):
         "last_sync_of_checkin": sync_timestamp
     }
     try:
-        response = requests.put(url, headers=headers, json=payload)
+        response = requests.put(url, headers=headers, json=payload, timeout=config.FETCH_INTERVAL)
         response.raise_for_status()
         success_logger.info(f"Updated shift type sync: {shift_type_name} to {sync_timestamp}")
     except Exception as e:
@@ -154,11 +164,6 @@ def process_logs(logs, device_id, sent_timestamps):
                     if send_to_erpnext(employee_no, timestamp, device_id, log_type):
                         sent_timestamps[employee_no].add(timestamp)
                         save_sent_timestamp(employee_no, timestamp)
-
-    sync_timestamp = datetime.now().strftime(config.DATE_FORMAT)
-    shift_types = fetch_all_shift_types()
-    for shift_type in shift_types:
-        update_last_sync_time(shift_type, sync_timestamp)
 
 
 def convert_minutes_to_time(minutes):
@@ -187,12 +192,18 @@ def main():
         logs = fetch_attendance_logs(
             start_time.strftime(config.DATE_FORMAT), end_time.strftime(config.DATE_FORMAT)
         )
-        
+
         if logs:
             process_logs(logs, config.HIKVISION_DEVICE_CONFIG["device_ip"], sent_timestamps)
 
+        shift_types = fetch_all_shift_types()
+        sync_timestamp = datetime.now().strftime(config.DATE_FORMAT)
+        for shift_type in shift_types:
+            update_last_sync_time(shift_type, sync_timestamp)
+            
         start_time = end_time
         end_time = datetime.now()
+        sleep(config.FETCH_INTERVAL)
 
 
 if __name__ == "__main__":
