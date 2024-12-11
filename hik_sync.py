@@ -51,7 +51,7 @@ def save_sent_timestamp(employee_no, timestamp):
 
 
 def fetch_attendance_logs(start_time, end_time):
-    i = 1
+    search_position = 1
     matchResults = []
     offset_value = 10
     no_of_employees = offset_value
@@ -63,13 +63,14 @@ def fetch_attendance_logs(start_time, end_time):
         }
         payload = {
             "searchID": "7215c76ab5d843179d31d3ee4b1d7aef",
-            "searchResultPosition": i,
+            "searchResultPosition": search_position,
             "maxResults": offset_value,
-            "statisticalTime": "month",
-            "month": datetime.now().strftime("%Y-%m"),
+            "statisticalTime": "duration",
+            "duration": {"startDate": start_time.strftime("%Y-%m-%d"), "endDate": end_time.strftime("%Y-%m-%d")},
+            # "month": datetime.now().strftime("%Y-%m"),
         }
         try:
-            if i > no_of_employees:
+            if search_position > no_of_employees:
                 return matchResults
             response = requests.post(
                 url,
@@ -89,7 +90,7 @@ def fetch_attendance_logs(start_time, end_time):
             failure_logger.error(f"Failed to fetch logs: {e}")
             return None
 
-        i += 10
+        search_position += 10
 
 def send_to_erpnext(employee_field_value, timestamp, device_id, log_type):
     url = f"{config.ERPNEXT_CONFIG['base_url']}/api/method/hrms.hr.doctype.employee_checkin.employee_checkin.add_log_based_on_employee_field"
@@ -140,7 +141,7 @@ def update_last_sync_time(shift_type_name, sync_timestamp):
         "last_sync_of_checkin": sync_timestamp
     }
     try:
-        response = requests.put(url, headers=headers, json=payload, timeout=config.FETCH_INTERVAL)
+        response = requests.put(url, headers=headers, json=payload)
         response.raise_for_status()
         success_logger.info(f"Updated shift type sync: {shift_type_name} to {sync_timestamp}")
     except Exception as e:
@@ -186,23 +187,20 @@ def fetch_logs_from_json(file_path):
 def main():
     sent_timestamps = load_sent_timestamps()
     end_time = datetime.now()
-    start_time = end_time - timedelta(minutes=config.FETCH_INTERVAL)
+    start_time = datetime.strptime(config.START_TIME, config.DATE_FORMAT)
 
     while True:
-        logs = fetch_attendance_logs(
-            start_time.strftime(config.DATE_FORMAT), end_time.strftime(config.DATE_FORMAT)
-        )
-
+        logs = fetch_attendance_logs(start_time, end_time)
         if logs:
             process_logs(logs, config.HIKVISION_DEVICE_CONFIG["device_ip"], sent_timestamps)
-
-        shift_types = fetch_all_shift_types()
-        sync_timestamp = datetime.now().strftime(config.DATE_FORMAT)
-        for shift_type in shift_types:
-            update_last_sync_time(shift_type, sync_timestamp)
+            shift_types = fetch_all_shift_types()
+            sync_timestamp = datetime.now().strftime(config.DATE_FORMAT)
+            for shift_type in shift_types:
+                update_last_sync_time(shift_type, sync_timestamp)
+            start_time = end_time
             
-        start_time = end_time
         end_time = datetime.now()
+
         sleep(config.FETCH_INTERVAL)
 
 
